@@ -1,0 +1,62 @@
+# .github/workflows/update-json.yml
+name: Refresh TV data JSONs
+
+on:
+  schedule:
+    - cron: "17 3 */3 * *"   # every 3 days
+  workflow_dispatch:          # manual trigger
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥  Check out repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0      # we overwrite history later
+
+      - name: 🐍  Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 📦  Install deps
+        run: |
+          pip install --upgrade pip
+          pip install requests pdfminer.six
+
+      - name: ⚙️  Run generators (inside data/)
+        run: |
+          python data/tv-logos.py        # -> data/logos.json
+          python data/epgshare01.py      # -> data/tvg-ids.json
+
+      - name: 🧹  Clean up extracted folder
+        run: |
+          rm -rf data/tv-logos-main      # created by tv-logos.py
+
+      - name: 📝  Commit (amend) updated JSONs
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # stage only the JSON outputs
+          git add data/logos.json data/tvg-ids.json
+
+          # exit early if nothing changed
+          if git diff --cached --quiet; then
+            echo "No changes – skipping commit."
+            exit 0
+          fi
+
+          # keep a single rolling commit
+          if git log -1 --pretty=%B | grep -q "chore: refresh JSON assets"; then
+            git commit --amend --no-edit
+          else
+            git commit -m "chore: refresh JSON assets"
+          fi
+
+      - name: 🚀  Force-push single commit
+        if: success()
+        run: |
+          git push --force-with-lease origin HEAD:${{ github.ref }}
